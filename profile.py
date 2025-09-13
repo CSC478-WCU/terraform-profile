@@ -5,7 +5,7 @@ CloudLab/Emulab JSON-based Profile (Phase-1)
 ...
 """
 
-import sys, json
+import sys, json, re
 import geni.portal as portal
 import geni.rspec.pg as pg
 import geni.rspec.igext as IG
@@ -43,6 +43,23 @@ def _parse_int_like(val, field_name, ctx_desc):
             except Exception:
                 pass
     die(EXIT_SCHEMA, "%s: '%s' must be an integer or numeric string. Got: %r" %
+        (ctx_desc, field_name, val))
+
+def _as_gb_size(val, field_name, ctx_desc):
+    """
+    Normalize blockstore size to 'NNGB' (string) for igext.
+    Accepts int/long, numeric string, or already-suffixed 'NNGB' (any case).
+    """
+    if isinstance(val, (int, long)):
+        return "%dGB" % int(val)
+    if isinstance(val, basestring):
+        s = val.strip()
+        m = re.match(r"^(\d+)\s*GB$", s, flags=re.IGNORECASE)
+        if m:
+            return "%sGB" % m.group(1)
+        if s.isdigit():
+            return "%sGB" % s
+    die(EXIT_SCHEMA, "%s: '%s' must be an integer, numeric string, or 'NNGB'. Got: %r" %
         (ctx_desc, field_name, val))
 
 # Portal setup
@@ -100,8 +117,8 @@ for n in nodes_cfg:
                 die(EXIT_SCHEMA, "node '%s': blockstore needs 'name'." % name)
             if "size" not in b:
                 die(EXIT_SCHEMA, "node '%s': blockstore needs 'size'." % name)
-            # Validate size now (allows int or numeric string)
-            _ = _parse_int_like(b["size"], "size", "node '%s' blockstore '%s'" % (name, get(b, "name")))
+            # Validate & normalize to 'NNGB'
+            _ = _as_gb_size(b["size"], "size", "node '%s' blockstore '%s'" % (name, get(b, "name")))
 
 # xenvm host references
 for n in nodes_cfg:
@@ -135,9 +152,9 @@ node_objs = {}
 def add_blockstores(node_obj, blks):
     for b in blks or []:
         bs = node_obj.Blockstore(b["name"], get(b, "mount"))
-        # Accept int or numeric string for size
-        bs.size = _parse_int_like(get(b, "size"), "size",
-                                  "node '%s' blockstore '%s'" % (node_obj.name, b["name"]))
+        # Normalize to 'NNGB' (string) expected by igext
+        bs.size = _as_gb_size(get(b, "size"), "size",
+                              "node '%s' blockstore '%s'" % (node_obj.name, b["name"]))
 
 def hydrate_common(node_obj, spec):
     if get(spec, "aggregate"): node_obj.component_manager_id = spec["aggregate"]
