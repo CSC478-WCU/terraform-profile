@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2
 # -*- coding: utf-8 -*-
 """
 CloudLab/Emulab JSON-based Profile (Phase-1)
@@ -27,6 +27,23 @@ def get(d, key, default=None):
 
 def booly(val, default=False):
     return default if val is None else bool(val)
+
+def _parse_int_like(val, field_name, ctx_desc):
+    """
+    Accept an int or a string of decimal digits (optionally with surrounding whitespace).
+    Raises EXIT_SCHEMA on any other type/format.
+    """
+    if isinstance(val, (int, long)):
+        return int(val)
+    if isinstance(val, basestring):
+        s = val.strip()
+        if s.isdigit():
+            try:
+                return int(s)
+            except Exception:
+                pass
+    die(EXIT_SCHEMA, "%s: '%s' must be an integer or numeric string. Got: %r" %
+        (ctx_desc, field_name, val))
 
 # Portal setup
 pc = portal.Context()
@@ -79,8 +96,12 @@ for n in nodes_cfg:
         if not isinstance(blks, list): die(EXIT_SCHEMA, "node '%s': blockstores must be list." % name)
         for b in blks:
             if not isinstance(b, dict): die(EXIT_SCHEMA, "node '%s': blockstore must be object." % name)
-            if not get(b, "name") or not isinstance(get(b, "size"), int):
-                die(EXIT_SCHEMA, "node '%s': blockstore needs 'name' and int 'size'." % name)
+            if not get(b, "name"):
+                die(EXIT_SCHEMA, "node '%s': blockstore needs 'name'." % name)
+            if "size" not in b:
+                die(EXIT_SCHEMA, "node '%s': blockstore needs 'size'." % name)
+            # Validate size now (allows int or numeric string)
+            _ = _parse_int_like(b["size"], "size", "node '%s' blockstore '%s'" % (name, get(b, "name")))
 
 # xenvm host references
 for n in nodes_cfg:
@@ -114,7 +135,9 @@ node_objs = {}
 def add_blockstores(node_obj, blks):
     for b in blks or []:
         bs = node_obj.Blockstore(b["name"], get(b, "mount"))
-        bs.size = int(b["size"])
+        # Accept int or numeric string for size
+        bs.size = _parse_int_like(get(b, "size"), "size",
+                                  "node '%s' blockstore '%s'" % (node_obj.name, b["name"]))
 
 def hydrate_common(node_obj, spec):
     if get(spec, "aggregate"): node_obj.component_manager_id = spec["aggregate"]
